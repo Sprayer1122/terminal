@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VM Terminal Emulator</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #000;
+            color: #00ff00;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        #terminal-container {
+            width: 100%;
+            height: 100vh;
+            background-color: #000;
+            position: relative;
+        }
+
+        .xterm {
+            height: 100% !important;
+            width: 100% !important;
+        }
+
+        .xterm-viewport {
+            background-color: #000 !important;
+        }
+
+        .xterm-screen {
+            background-color: #000 !important;
+        }
+
+        /* Custom scrollbar for terminal */
+        .xterm-viewport::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .xterm-viewport::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+
+        .xterm-viewport::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+
+        .xterm-viewport::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* Connection status indicator */
+        .status-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 30px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: #00ff00;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            font-size: 12px;
+            z-index: 1000;
+            border-bottom: 1px solid #333;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+            background-color: #ff0000;
+        }
+
+        .status-indicator.connected {
+            background-color: #00ff00;
+        }
+
+        .status-indicator.connecting {
+            background-color: #ffff00;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .connection-info {
+            flex: 1;
+        }
+
+        .reconnect-btn {
+            background: none;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 2px 8px;
+            cursor: pointer;
+            font-size: 10px;
+            margin-left: 10px;
+        }
+
+        .reconnect-btn:hover {
+            background-color: #00ff00;
+            color: #000;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .xterm {
+                font-size: 12px !important;
+            }
+            .status-bar {
+                height: 25px;
+                font-size: 10px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .xterm {
+                font-size: 10px !important;
+            }
+        }
+
+        /* Loading indicator */
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00ff00;
+            font-size: 18px;
+            z-index: 1000;
+        }
+
+        /* Hidden element for copy-paste */
+        #copy-buffer {
+            position: absolute;
+            left: -9999px;
+            top: -9999px;
+            opacity: 0;
+        }
+
+        /* Connection modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            z-index: 2000;
+        }
+
+        .modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #000;
+            border: 1px solid #00ff00;
+            padding: 20px;
+            color: #00ff00;
+            min-width: 300px;
+        }
+
+        .modal input {
+            background-color: #000;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 8px;
+            margin: 10px 0;
+            width: 100%;
+            font-family: monospace;
+        }
+
+        .modal button {
+            background-color: #00ff00;
+            color: #000;
+            border: none;
+            padding: 8px 16px;
+            cursor: pointer;
+            margin: 5px;
+            font-family: monospace;
+        }
+
+        .modal button:hover {
+            background-color: #00cc00;
+        }
+    </style>
+</head>
+<body>
+    <div class="status-bar">
+        <div class="status-indicator" id="status-indicator"></div>
+        <div class="connection-info" id="connection-info">Disconnected</div>
+        <button class="reconnect-btn" id="reconnect-btn" onclick="showConnectionModal()">Connect</button>
+    </div>
+
+    <div id="terminal-container">
+        <div class="loading" id="loading">Initializing terminal...</div>
+    </div>
+    <textarea id="copy-buffer" readonly></textarea>
+
+    <!-- Connection Modal -->
+    <div class="modal" id="connection-modal">
+        <div class="modal-content">
+            <h3>Connect to VM Terminal</h3>
+            <div>
+                <label>Server Host:</label>
+                <input type="text" id="server-host" value="localhost" placeholder="localhost">
+            </div>
+            <div>
+                <label>Server Port:</label>
+                <input type="text" id="server-port" value="8765" placeholder="8765">
+            </div>
+            <div>
+                <button onclick="connectToServer()">Connect</button>
+                <button onclick="hideConnectionModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.min.js"></script>
+
+    <script>
+        // WebSocket Terminal Emulator Class
+        class WebSocketTerminalEmulator {
+            constructor() {
+                this.terminal = null;
+                this.fitAddon = null;
+                this.webLinksAddon = null;
+                this.webglAddon = null;
+                this.websocket = null;
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 5;
+                this.reconnectDelay = 2000;
+                this.isConnected = false;
+                
+                this.container = document.getElementById('terminal-container');
+                this.loadingElement = document.getElementById('loading');
+                this.copyBuffer = document.getElementById('copy-buffer');
+                this.statusIndicator = document.getElementById('status-indicator');
+                this.connectionInfo = document.getElementById('connection-info');
+                this.reconnectBtn = document.getElementById('reconnect-btn');
+                
+                // Default connection settings
+                this.serverHost = localStorage.getItem('serverHost') || 'localhost';
+                this.serverPort = localStorage.getItem('serverPort') || '8765';
+                
+                this.init();
+            }
+
+            async init() {
+                try {
+                    await this.createTerminal();
+                    this.setupEventListeners();
+                    this.updateConnectionStatus('disconnected');
+                    
+                    // Auto-connect if we have saved settings
+                    if (this.serverHost && this.serverPort) {
+                        this.connectToServer();
+                    } else {
+                        this.showConnectionModal();
+                    }
+                } catch (error) {
+                    console.error('Failed to initialize terminal:', error);
+                    this.showError('Failed to initialize terminal');
+                }
+            }
+
+            async createTerminal() {
+                // Create terminal instance
+                this.terminal = new Terminal({
+                    cursorBlink: true,
+                    cursorStyle: 'block',
+                    fontSize: 14,
+                    fontFamily: 'Consolas, "Courier New", monospace',
+                    theme: {
+                        background: '#000000',
+                        foreground: '#00ff00',
+                        cursor: '#00ff00',
+                        selection: '#ffffff40',
+                        black: '#000000',
+                        red: '#ff0000',
+                        green: '#00ff00',
+                        yellow: '#ffff00',
+                        blue: '#0000ff',
+                        magenta: '#ff00ff',
+                        cyan: '#00ffff',
+                        white: '#ffffff',
+                        brightBlack: '#666666',
+                        brightRed: '#ff6666',
+                        brightGreen: '#66ff66',
+                        brightYellow: '#ffff66',
+                        brightBlue: '#6666ff',
+                        brightMagenta: '#ff66ff',
+                        brightCyan: '#66ffff',
+                        brightWhite: '#ffffff'
+                    },
+                    scrollback: 1000,
+                    cols: 80,
+                    rows: 24
+                });
+
+                // Create addons
+                this.fitAddon = new FitAddon.FitAddon();
+                this.webLinksAddon = new WebLinksAddon.WebLinksAddon();
+                this.webglAddon = new WebglAddon.WebglAddon();
+
+                // Load addons
+                this.terminal.loadAddon(this.fitAddon);
+                this.terminal.loadAddon(this.webLinksAddon);
+                this.terminal.loadAddon(this.webglAddon);
+
+                // Open terminal
+                this.terminal.open(this.container);
+                
+                // Fit to container
+                this.fitAddon.fit();
+                
+                // Enable WebGL renderer
+                try {
+                    await this.webglAddon.onContextLoss(() => {
+                        this.webglAddon.dispose();
+                    });
+                } catch (error) {
+                    console.warn('WebGL not available, falling back to canvas renderer');
+                }
+
+                // Hide loading indicator
+                this.loadingElement.style.display = 'none';
+            }
+
+            setupEventListeners() {
+                // Handle terminal input
+                this.terminal.onData((data) => {
+                    if (this.isConnected && this.websocket) {
+                        this.sendToServer({
+                            type: 'input',
+                            data: data
+                        });
+                    }
+                });
+
+                // Handle terminal resize
+                this.terminal.onResize((size) => {
+                    if (this.isConnected && this.websocket) {
+                        this.sendToServer({
+                            type: 'resize',
+                            cols: size.cols,
+                            rows: size.rows
+                        });
+                    }
+                });
+
+                // Handle window resize
+                window.addEventListener('resize', () => {
+                    this.fitAddon.fit();
+                });
+
+                // Handle copy-paste
+                document.addEventListener('keydown', (e) => {
+                    this.handleKeyboardShortcuts(e);
+                });
+
+                // Handle context menu for copy-paste
+                this.terminal.element.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    this.showContextMenu(e);
+                });
+            }
+
+            connectToServer() {
+                if (this.websocket) {
+                    this.websocket.close();
+                }
+
+                this.updateConnectionStatus('connecting');
+                
+                const wsUrl = `ws://${this.serverHost}:${this.serverPort}`;
+                console.log(`Connecting to ${wsUrl}`);
+                
+                this.websocket = new WebSocket(wsUrl);
+                
+                this.websocket.onopen = () => {
+                    console.log('WebSocket connected');
+                    this.isConnected = true;
+                    this.reconnectAttempts = 0;
+                    this.updateConnectionStatus('connected');
+                    this.terminal.focus();
+                };
+                
+                this.websocket.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        if (message.type === 'output') {
+                            this.terminal.write(message.data);
+                        }
+                    } catch (error) {
+                        console.error('Error parsing message:', error);
+                    }
+                };
+                
+                this.websocket.onclose = (event) => {
+                    console.log('WebSocket disconnected:', event.code, event.reason);
+                    this.isConnected = false;
+                    this.updateConnectionStatus('disconnected');
+                    
+                    if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+                        this.scheduleReconnect();
+                    }
+                };
+                
+                this.websocket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.updateConnectionStatus('error');
+                };
+            }
+
+            scheduleReconnect() {
+                this.reconnectAttempts++;
+                const delay = this.reconnectDelay * this.reconnectAttempts;
+                console.log(`Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
+                
+                setTimeout(() => {
+                    if (!this.isConnected) {
+                        this.connectToServer();
+                    }
+                }, delay);
+            }
+
+            sendToServer(message) {
+                if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                    this.websocket.send(JSON.stringify(message));
+                }
+            }
+
+            updateConnectionStatus(status) {
+                this.statusIndicator.className = 'status-indicator ' + status;
+                
+                switch (status) {
+                    case 'connected':
+                        this.connectionInfo.textContent = `Connected to ${this.serverHost}:${this.serverPort}`;
+                        this.reconnectBtn.textContent = 'Disconnect';
+                        break;
+                    case 'connecting':
+                        this.connectionInfo.textContent = 'Connecting...';
+                        this.reconnectBtn.textContent = 'Cancel';
+                        break;
+                    case 'disconnected':
+                        this.connectionInfo.textContent = 'Disconnected';
+                        this.reconnectBtn.textContent = 'Connect';
+                        break;
+                    case 'error':
+                        this.connectionInfo.textContent = 'Connection Error';
+                        this.reconnectBtn.textContent = 'Reconnect';
+                        break;
+                }
+            }
+
+            handleKeyboardShortcuts(e) {
+                if (e.ctrlKey) {
+                    switch (e.key.toLowerCase()) {
+                        case 'c':
+                            e.preventDefault();
+                            this.copySelection();
+                            break;
+                        case 'v':
+                            e.preventDefault();
+                            this.pasteFromClipboard();
+                            break;
+                        case 'l':
+                            e.preventDefault();
+                            this.terminal.clear();
+                            break;
+                    }
+                }
+            }
+
+            copySelection() {
+                const selection = this.terminal.getSelection();
+                if (selection) {
+                    this.copyBuffer.value = selection;
+                    this.copyBuffer.select();
+                    document.execCommand('copy');
+                    this.terminal.write('\r\nSelection copied to clipboard\r\n');
+                }
+            }
+
+            async pasteFromClipboard() {
+                try {
+                    const text = await navigator.clipboard.readText();
+                    if (this.isConnected) {
+                        this.sendToServer({
+                            type: 'input',
+                            data: text
+                        });
+                    }
+                } catch (error) {
+                    console.warn('Failed to read clipboard:', error);
+                }
+            }
+
+            showContextMenu(e) {
+                e.preventDefault();
+                const selection = this.terminal.getSelection();
+                
+                if (selection) {
+                    // Copy selection
+                    this.copyBuffer.value = selection;
+                    this.copyBuffer.select();
+                    document.execCommand('copy');
+                    this.terminal.write('\r\nSelection copied to clipboard\r\n');
+                } else {
+                    // Paste from clipboard
+                    this.pasteFromClipboard();
+                }
+            }
+
+            showError(message) {
+                this.terminal.write(`\r\nError: ${message}\r\n`);
+            }
+
+            disconnect() {
+                if (this.websocket) {
+                    this.websocket.close(1000, 'User disconnect');
+                }
+            }
+        }
+
+        // Global functions for modal
+        function showConnectionModal() {
+            document.getElementById('connection-modal').style.display = 'block';
+            document.getElementById('server-host').value = terminalEmulator.serverHost;
+            document.getElementById('server-port').value = terminalEmulator.serverPort;
+        }
+
+        function hideConnectionModal() {
+            document.getElementById('connection-modal').style.display = 'none';
+        }
+
+        function connectToServer() {
+            const host = document.getElementById('server-host').value;
+            const port = document.getElementById('server-port').value;
+            
+            if (host && port) {
+                terminalEmulator.serverHost = host;
+                terminalEmulator.serverPort = port;
+                
+                // Save to localStorage
+                localStorage.setItem('serverHost', host);
+                localStorage.setItem('serverPort', port);
+                
+                hideConnectionModal();
+                terminalEmulator.connectToServer();
+            }
+        }
+
+        // Initialize terminal when page loads
+        let terminalEmulator;
+        document.addEventListener('DOMContentLoaded', () => {
+            terminalEmulator = new WebSocketTerminalEmulator();
+        });
+
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                // Refocus terminal when page becomes visible
+                const terminalElement = document.querySelector('.xterm');
+                if (terminalElement) {
+                    terminalElement.focus();
+                }
+            }
+        });
+
+        // Handle page unload
+        window.addEventListener('beforeunload', () => {
+            if (terminalEmulator) {
+                terminalEmulator.disconnect();
+            }
+        });
+    </script>
+</body>
+</html> 

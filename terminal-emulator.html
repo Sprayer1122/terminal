@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Linux Terminal Emulator</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #000;
+            color: #00ff00;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        #terminal-container {
+            width: 100%;
+            height: 100vh;
+            background-color: #000;
+            position: relative;
+        }
+
+        .xterm {
+            height: 100% !important;
+            width: 100% !important;
+        }
+
+        .xterm-viewport {
+            background-color: #000 !important;
+        }
+
+        .xterm-screen {
+            background-color: #000 !important;
+        }
+
+        /* Custom scrollbar for terminal */
+        .xterm-viewport::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .xterm-viewport::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+
+        .xterm-viewport::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+
+        .xterm-viewport::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .xterm {
+                font-size: 12px !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .xterm {
+                font-size: 10px !important;
+            }
+        }
+
+        /* Loading indicator */
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00ff00;
+            font-size: 18px;
+            z-index: 1000;
+        }
+
+        /* Hidden element for copy-paste */
+        #copy-buffer {
+            position: absolute;
+            left: -9999px;
+            top: -9999px;
+            opacity: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="terminal-container">
+        <div class="loading" id="loading">Initializing terminal...</div>
+    </div>
+    <textarea id="copy-buffer" readonly></textarea>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.min.js"></script>
+
+    <script>
+        // Terminal Emulator Class
+        class TerminalEmulator {
+            constructor() {
+                this.terminal = null;
+                this.fitAddon = null;
+                this.webLinksAddon = null;
+                this.webglAddon = null;
+                this.commandHistory = [];
+                this.historyIndex = -1;
+                this.currentCommand = '';
+                this.isProcessingCommand = false;
+                this.prompt = '$ ';
+                this.container = document.getElementById('terminal-container');
+                this.loadingElement = document.getElementById('loading');
+                this.copyBuffer = document.getElementById('copy-buffer');
+                
+                this.init();
+            }
+
+            async init() {
+                try {
+                    await this.createTerminal();
+                    this.setupEventListeners();
+                    this.displayWelcomeMessage();
+                    this.showPrompt();
+                } catch (error) {
+                    console.error('Failed to initialize terminal:', error);
+                    this.showError('Failed to initialize terminal');
+                }
+            }
+
+            async createTerminal() {
+                // Create terminal instance
+                this.terminal = new Terminal({
+                    cursorBlink: true,
+                    cursorStyle: 'block',
+                    fontSize: 14,
+                    fontFamily: 'Consolas, "Courier New", monospace',
+                    theme: {
+                        background: '#000000',
+                        foreground: '#00ff00',
+                        cursor: '#00ff00',
+                        selection: '#ffffff40',
+                        black: '#000000',
+                        red: '#ff0000',
+                        green: '#00ff00',
+                        yellow: '#ffff00',
+                        blue: '#0000ff',
+                        magenta: '#ff00ff',
+                        cyan: '#00ffff',
+                        white: '#ffffff',
+                        brightBlack: '#666666',
+                        brightRed: '#ff6666',
+                        brightGreen: '#66ff66',
+                        brightYellow: '#ffff66',
+                        brightBlue: '#6666ff',
+                        brightMagenta: '#ff66ff',
+                        brightCyan: '#66ffff',
+                        brightWhite: '#ffffff'
+                    },
+                    scrollback: 1000,
+                    cols: 80,
+                    rows: 24
+                });
+
+                // Create addons
+                this.fitAddon = new FitAddon.FitAddon();
+                this.webLinksAddon = new WebLinksAddon.WebLinksAddon();
+                this.webglAddon = new WebglAddon.WebglAddon();
+
+                // Load addons
+                this.terminal.loadAddon(this.fitAddon);
+                this.terminal.loadAddon(this.webLinksAddon);
+                this.terminal.loadAddon(this.webglAddon);
+
+                // Open terminal
+                this.terminal.open(this.container);
+                
+                // Fit to container
+                this.fitAddon.fit();
+                
+                // Enable WebGL renderer
+                try {
+                    await this.webglAddon.onContextLoss(() => {
+                        this.webglAddon.dispose();
+                    });
+                } catch (error) {
+                    console.warn('WebGL not available, falling back to canvas renderer');
+                }
+
+                // Hide loading indicator
+                this.loadingElement.style.display = 'none';
+            }
+
+            setupEventListeners() {
+                // Handle terminal input
+                this.terminal.onData((data) => {
+                    this.handleInput(data);
+                });
+
+                // Handle window resize
+                window.addEventListener('resize', () => {
+                    this.fitAddon.fit();
+                });
+
+                // Handle copy-paste
+                document.addEventListener('keydown', (e) => {
+                    this.handleKeyboardShortcuts(e);
+                });
+
+                // Handle context menu for copy-paste
+                this.terminal.element.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    this.showContextMenu(e);
+                });
+            }
+
+            handleInput(data) {
+                if (this.isProcessingCommand) return;
+
+                const code = data.charCodeAt(0);
+                
+                // Handle special keys
+                if (code === 13) { // Enter
+                    this.executeCommand();
+                } else if (code === 8) { // Backspace
+                    if (this.currentCommand.length > 0) {
+                        this.currentCommand = this.currentCommand.slice(0, -1);
+                        this.terminal.write('\b \b');
+                    }
+                } else if (code === 3) { // Ctrl+C
+                    this.handleCtrlC();
+                } else if (code === 12) { // Ctrl+L
+                    this.clearScreen();
+                } else if (code === 26) { // Ctrl+Z
+                    this.handleCtrlZ();
+                } else if (code === 4) { // Ctrl+D
+                    this.handleCtrlD();
+                } else if (code === 27) { // Escape sequence
+                    this.handleEscapeSequence(data);
+                } else if (data >= ' ') { // Printable characters
+                    this.currentCommand += data;
+                    this.terminal.write(data);
+                }
+            }
+
+            handleEscapeSequence(data) {
+                // Handle arrow keys and other escape sequences
+                if (data === '\u001b[A') { // Up arrow
+                    this.navigateHistory('up');
+                } else if (data === '\u001b[B') { // Down arrow
+                    this.navigateHistory('down');
+                } else if (data === '\u001b[C') { // Right arrow
+                    // Move cursor right
+                } else if (data === '\u001b[D') { // Left arrow
+                    // Move cursor left
+                } else if (data === '\u001b[3~') { // Delete
+                    // Handle delete
+                }
+            }
+
+            handleKeyboardShortcuts(e) {
+                if (e.ctrlKey) {
+                    switch (e.key.toLowerCase()) {
+                        case 'c':
+                            e.preventDefault();
+                            this.copySelection();
+                            break;
+                        case 'v':
+                            e.preventDefault();
+                            this.pasteFromClipboard();
+                            break;
+                        case 'l':
+                            e.preventDefault();
+                            this.clearScreen();
+                            break;
+                        case 'u':
+                            e.preventDefault();
+                            this.clearLine();
+                            break;
+                        case 'k':
+                            e.preventDefault();
+                            this.clearFromCursor();
+                            break;
+                    }
+                }
+            }
+
+            handleCtrlC() {
+                this.terminal.write('\r\n');
+                this.currentCommand = '';
+                this.showPrompt();
+            }
+
+            handleCtrlZ() {
+                this.terminal.write('\r\n[1]  + Stopped\r\n');
+                this.currentCommand = '';
+                this.showPrompt();
+            }
+
+            handleCtrlD() {
+                this.terminal.write('\r\nlogout\r\n');
+                // Could implement actual logout here
+                setTimeout(() => {
+                    this.showPrompt();
+                }, 1000);
+            }
+
+            navigateHistory(direction) {
+                if (this.commandHistory.length === 0) return;
+
+                if (direction === 'up') {
+                    if (this.historyIndex < this.commandHistory.length - 1) {
+                        this.historyIndex++;
+                    }
+                } else if (direction === 'down') {
+                    if (this.historyIndex > 0) {
+                        this.historyIndex--;
+                    } else if (this.historyIndex === 0) {
+                        this.historyIndex = -1;
+                        this.clearCurrentLine();
+                        this.currentCommand = '';
+                        return;
+                    }
+                }
+
+                if (this.historyIndex >= 0) {
+                    this.clearCurrentLine();
+                    this.currentCommand = this.commandHistory[this.commandHistory.length - 1 - this.historyIndex];
+                    this.terminal.write(this.currentCommand);
+                }
+            }
+
+            clearCurrentLine() {
+                // Clear the current line
+                const currentLength = this.currentCommand.length;
+                for (let i = 0; i < currentLength; i++) {
+                    this.terminal.write('\b \b');
+                }
+            }
+
+            clearLine() {
+                this.clearCurrentLine();
+                this.currentCommand = '';
+            }
+
+            clearFromCursor() {
+                this.currentCommand = '';
+                this.terminal.write('\x1b[K');
+            }
+
+            executeCommand() {
+                const command = this.currentCommand.trim();
+                
+                if (command) {
+                    this.commandHistory.push(command);
+                    this.historyIndex = -1;
+                }
+
+                this.terminal.write('\r\n');
+                this.isProcessingCommand = true;
+
+                // Process command
+                const result = this.processCommand(command);
+                
+                if (result) {
+                    this.terminal.write(result + '\r\n');
+                }
+
+                this.isProcessingCommand = false;
+                this.currentCommand = '';
+                this.showPrompt();
+            }
+
+            processCommand(command) {
+                if (!command) return '';
+
+                const parts = command.split(' ');
+                const cmd = parts[0].toLowerCase();
+                const args = parts.slice(1);
+
+                switch (cmd) {
+                    case 'ls':
+                        return this.lsCommand(args);
+                    case 'pwd':
+                        return this.pwdCommand();
+                    case 'echo':
+                        return this.echoCommand(args);
+                    case 'clear':
+                        this.clearScreen();
+                        return '';
+                    case 'cd':
+                        return this.cdCommand(args);
+                    case 'cat':
+                        return this.catCommand(args);
+                    case 'whoami':
+                        return this.whoamiCommand();
+                    case 'date':
+                        return this.dateCommand();
+                    case 'ps':
+                        return this.psCommand();
+                    case 'top':
+                        return this.topCommand();
+                    case 'help':
+                        return this.helpCommand();
+                    case 'history':
+                        return this.historyCommand();
+                    case 'exit':
+                    case 'logout':
+                        return this.exitCommand();
+                    default:
+                        return `bash: ${cmd}: command not found`;
+                }
+            }
+
+            lsCommand(args) {
+                const files = [
+                    'Documents/',
+                    'Downloads/',
+                    'Pictures/',
+                    'Music/',
+                    'Videos/',
+                    'Desktop/',
+                    'file1.txt',
+                    'file2.txt',
+                    'script.sh',
+                    'config.json',
+                    'README.md'
+                ];
+
+                if (args.includes('-l')) {
+                    return files.map(file => {
+                        const isDir = file.endsWith('/');
+                        const permissions = isDir ? 'drwxr-xr-x' : '-rw-r--r--';
+                        const size = isDir ? '4096' : Math.floor(Math.random() * 1000 + 100).toString();
+                        const date = new Date().toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                        return `${permissions} 1 user user ${size} ${date} ${file}`;
+                    }).join('\r\n');
+                } else if (args.includes('-a')) {
+                    return ['.', '..', ...files].join('  ');
+                } else {
+                    return files.join('  ');
+                }
+            }
+
+            pwdCommand() {
+                return '/home/user';
+            }
+
+            echoCommand(args) {
+                return args.join(' ');
+            }
+
+            cdCommand(args) {
+                if (args.length === 0) {
+                    return '';
+                }
+                const dir = args[0];
+                if (dir === '~' || dir === '/home/user') {
+                    return '';
+                } else if (dir === '..') {
+                    return '';
+                } else if (dir === '.') {
+                    return '';
+                } else {
+                    return `bash: cd: ${dir}: No such file or directory`;
+                }
+            }
+
+            catCommand(args) {
+                if (args.length === 0) {
+                    return 'cat: missing file operand';
+                }
+                const filename = args[0];
+                if (filename === 'file1.txt') {
+                    return 'This is the content of file1.txt\r\nIt contains some sample text.\r\nYou can edit this file using any text editor.';
+                } else if (filename === 'file2.txt') {
+                    return 'Another sample file\r\nWith multiple lines\r\nOf content.';
+                } else if (filename === 'README.md') {
+                    return '# Sample Project\r\n\r\nThis is a sample README file.\r\n\r\n## Features\r\n- Feature 1\r\n- Feature 2\r\n- Feature 3\r\n\r\n## Installation\r\n```bash\r\nnpm install\r\n```';
+                } else {
+                    return `cat: ${filename}: No such file or directory`;
+                }
+            }
+
+            whoamiCommand() {
+                return 'user';
+            }
+
+            dateCommand() {
+                return new Date().toString();
+            }
+
+            psCommand() {
+                return `  PID TTY          TIME CMD\r\n 1234 pts/0    00:00:00 bash\r\n 1235 pts/0    00:00:00 ps`;
+            }
+
+            topCommand() {
+                return `top - 14:30:45 up 2:30,  1 user,  load average: 0.52, 0.58, 0.59\r\nTasks:  95 total,   1 running,  94 sleeping,   0 stopped,   0 zombie\r\n%Cpu(s):  2.3 us,  1.2 sy,  0.0 ni, 96.3 id,  0.2 wa,  0.0 hi,  0.0 si,  0.0 st\r\nMiB Mem :   8192.0 total,   2048.0 free,   3072.0 used,   3072.0 buff/cache\r\nMiB Swap:   4096.0 total,   4096.0 free,      0.0 used.   4096.0 avail Mem\r\n\r\n  PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND\r\n 1234 user      20   0   12345   6789   1234 S   2.3   8.3   0:00.12 bash`;
+            }
+
+            helpCommand() {
+                return `Available commands:\r\n` +
+                       `  ls, pwd, echo, clear, cd, cat, whoami, date, ps, top, help, history, exit\r\n\r\n` +
+                       `Keyboard shortcuts:\r\n` +
+                       `  Ctrl+C: Cancel current command\r\n` +
+                       `  Ctrl+L: Clear screen\r\n` +
+                       `  Ctrl+U: Clear line\r\n` +
+                       `  Ctrl+K: Clear from cursor to end\r\n` +
+                       `  Up/Down arrows: Navigate command history\r\n` +
+                       `  Ctrl+C/V: Copy/Paste`;
+            }
+
+            historyCommand() {
+                if (this.commandHistory.length === 0) {
+                    return 'No commands in history';
+                }
+                return this.commandHistory.map((cmd, index) => 
+                    `${index + 1}  ${cmd}`
+                ).join('\r\n');
+            }
+
+            exitCommand() {
+                this.terminal.write('logout\r\n');
+                setTimeout(() => {
+                    this.showPrompt();
+                }, 1000);
+                return '';
+            }
+
+            clearScreen() {
+                this.terminal.clear();
+                this.showPrompt();
+            }
+
+            showPrompt() {
+                this.terminal.write(this.prompt);
+            }
+
+            displayWelcomeMessage() {
+                const welcome = [
+                    'Welcome to Linux Terminal Emulator',
+                    'Type "help" for available commands',
+                    'Type "exit" or "logout" to end session',
+                    '',
+                    ''
+                ].join('\r\n');
+                this.terminal.write(welcome);
+            }
+
+            showError(message) {
+                this.terminal.write(`\r\nError: ${message}\r\n`);
+            }
+
+            copySelection() {
+                const selection = this.terminal.getSelection();
+                if (selection) {
+                    this.copyBuffer.value = selection;
+                    this.copyBuffer.select();
+                    document.execCommand('copy');
+                    this.terminal.write('\r\nSelection copied to clipboard\r\n');
+                }
+            }
+
+            async pasteFromClipboard() {
+                try {
+                    const text = await navigator.clipboard.readText();
+                    this.currentCommand += text;
+                    this.terminal.write(text);
+                } catch (error) {
+                    console.warn('Failed to read clipboard:', error);
+                }
+            }
+
+            showContextMenu(e) {
+                e.preventDefault();
+                const selection = this.terminal.getSelection();
+                
+                if (selection) {
+                    // Copy selection
+                    this.copyBuffer.value = selection;
+                    this.copyBuffer.select();
+                    document.execCommand('copy');
+                    this.terminal.write('\r\nSelection copied to clipboard\r\n');
+                } else {
+                    // Paste from clipboard
+                    this.pasteFromClipboard();
+                }
+            }
+        }
+
+        // Initialize terminal when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new TerminalEmulator();
+        });
+
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                // Refocus terminal when page becomes visible
+                const terminalElement = document.querySelector('.xterm');
+                if (terminalElement) {
+                    terminalElement.focus();
+                }
+            }
+        });
+    </script>
+</body>
+</html> 
