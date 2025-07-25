@@ -1,38 +1,19 @@
-#!/bin/bash
+sjcvl-amittal: /home/amittal/termina_pro/terminal >python3 server.py
+/home/amittal/termina_pro/terminal/server.py:20: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+  from websockets.server import WebSocketServerProtocol
+INFO:websockets.server:server listening on 127.0.0.1:8765
+INFO:__main__:Terminal server started on ws://localhost:8765
+INFO:__main__:Press Ctrl+C to stop the server
+INFO:websockets.server:connection rejected (426 Upgrade Required)
+ERROR:websockets.server:opening handshake failed
+Traceback (most recent call last):
+  File "/home/amittal/.local/lib/python3.9/site-packages/websockets/asyncio/server.py", line 356, in conn_handler
+    await connection.handshake(
+  File "/home/amittal/.local/lib/python3.9/site-packages/websockets/asyncio/server.py", line 207, in handshake
+    raise self.protocol.handshake_exc
+  File "/home/amittal/.local/lib/python3.9/site-packages/websockets/server.py", line 138, in accept
+    ) = self.process_request(request)
+  File "/home/amittal/.local/lib/python3.9/site-packages/websockets/server.py", line 233, in process_request
+    raise InvalidUpgrade(
+websockets.exceptions.InvalidUpgrade: invalid Connection header: keep-alive
 
-# Terminal Emulator Setup Script
-echo "🚀 Setting up VM Terminal Emulator..."
-
-# Check if Python 3 is installed
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 is not installed. Please install Python 3 first."
-    exit 1
-fi
-
-# Check if pip is installed
-if ! command -v pip3 &> /dev/null; then
-    echo "❌ pip3 is not installed. Please install pip3 first."
-    exit 1
-fi
-
-# Install Python dependencies
-echo "📦 Installing Python dependencies..."
-pip3 install -r requirements.txt
-
-# Make server script executable
-chmod +x server.py
-
-echo "✅ Setup complete!"
-echo ""
-echo "🎯 To start the terminal server:"
-echo "   python3 server.py"
-echo ""
-echo "🌐 To connect from another machine:"
-echo "   python3 server.py --host 0.0.0.0 --port 8765"
-echo ""
-echo "📱 Open terminal-emulator-ws.html in your browser to connect!"
-echo ""
-echo "🔧 Available options:"
-echo "   --host: Server host (default: localhost)"
-echo "   --port: Server port (default: 8765)"
-echo "   --debug: Enable debug logging" 
