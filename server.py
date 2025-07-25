@@ -17,7 +17,7 @@ import tty
 from typing import Optional
 
 import websockets
-from websockets.server import WebSocketServerProtocol
+from websockets.server import serve
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class TerminalSession:
     """Manages a single terminal session with PTY"""
     
-    def __init__(self, websocket: WebSocketServerProtocol):
+    def __init__(self, websocket):
         self.websocket = websocket
         self.master_fd = None
         self.slave_fd = None
@@ -147,55 +147,27 @@ class TerminalSession:
         if not self.websocket.closed:
             await self.websocket.close()
 
-class TerminalServer:
-    """WebSocket server for terminal connections"""
+async def handle_connection(websocket, path):
+    """Handle new WebSocket connection"""
+    client_ip = websocket.remote_address[0] if websocket.remote_address else 'unknown'
+    logger.info(f"New connection from {client_ip}")
     
-    def __init__(self, host: str = 'localhost', port: int = 8765):
-        self.host = host
-        self.port = port
-        self.sessions = set()
+    # Create terminal session
+    session = TerminalSession(websocket)
     
-    async def handle_connection(self, websocket: WebSocketServerProtocol, path: str):
-        """Handle new WebSocket connection"""
-        client_ip = websocket.remote_address[0] if websocket.remote_address else 'unknown'
-        logger.info(f"New connection from {client_ip}")
+    try:
+        # Start the terminal session
+        await session.start()
         
-        # Create terminal session
-        session = TerminalSession(websocket)
-        self.sessions.add(session)
+        # Keep connection alive
+        await websocket.wait_closed()
         
-        try:
-            # Start the terminal session
-            await session.start()
-            
-            # Keep connection alive
-            await websocket.wait_closed()
-            
-        except Exception as e:
-            logger.error(f"Error handling connection: {e}")
-        finally:
-            self.sessions.discard(session)
-            logger.info(f"Connection from {client_ip} closed")
-    
-    async def start_server(self):
-        """Start the WebSocket server"""
-        server = await websockets.serve(
-            self.handle_connection,
-            self.host,
-            self.port
-        )
-        
-        logger.info(f"Terminal server started on ws://{self.host}:{self.port}")
-        logger.info("Press Ctrl+C to stop the server")
-        
-        try:
-            await server.wait_closed()
-        except KeyboardInterrupt:
-            logger.info("Shutting down server...")
-            server.close()
-            await server.wait_closed()
+    except Exception as e:
+        logger.error(f"Error handling connection: {e}")
+    finally:
+        logger.info(f"Connection from {client_ip} closed")
 
-def main():
+async def main():
     """Main entry point"""
     import argparse
     
@@ -209,16 +181,17 @@ def main():
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    # Create and start server
-    server = TerminalServer(args.host, args.port)
+    logger.info(f"Terminal server starting on ws://{args.host}:{args.port}")
+    logger.info("Press Ctrl+C to stop the server")
     
     try:
-        asyncio.run(server.start_server())
+        async with serve(handle_connection, args.host, args.port):
+            await asyncio.Future()  # run forever
     except KeyboardInterrupt:
-        logger.info("Server stopped by user")
+        logger.info("Shutting down server...")
     except Exception as e:
         logger.error(f"Server error: {e}")
         sys.exit(1)
 
 if __name__ == '__main__':
-    main() 
+    asyncio.run(main()) 
